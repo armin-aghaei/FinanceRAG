@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: your-app-name  # Set this to your Azure Web App name
+  AZURE_WEBAPP_NAME: finance-rag-api
   PYTHON_VERSION: '3.11'
 
 jobs:
