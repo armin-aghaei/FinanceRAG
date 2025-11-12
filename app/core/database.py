@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from app.core.config import settings
+import ssl
 
 # Create async engine
 engine = create_async_engine(
@@ -9,7 +10,8 @@ engine = create_async_engine(
     future=True,
     pool_pre_ping=True,
     pool_size=10,
-    max_overflow=20
+    max_overflow=20,
+    connect_args={"ssl": ssl.create_default_context()}
 )
 
 # Create async session factory
