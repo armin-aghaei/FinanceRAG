@@ -1,0 +1,134 @@
+{
+  "name": "rag-semantic-skillset",
+  "description": "Skillset for RAG with OCR, text split, and embeddings",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Vision.OcrSkill",
+      "name": "ocr-skill",
+      "description": "Extract text from PDFs and images",
+      "context": "/document/normalized_images/*",
+      "inputs": [
+        {
+          "name": "image",
+          "source": "/document/normalized_images/*"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "targetName": "extractedText"
+        }
+      ],
+      "defaultLanguageCode": "en"
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.MergeSkill",
+      "name": "merge-skill",
+      "description": "Merge OCR text with native PDF text",
+      "context": "/document",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/content"
+        },
+        {
+          "name": "itemsToInsert",
+          "source": "/document/normalized_images/*/extractedText"
+        },
+        {
+          "name": "offsets",
+          "source": "/document/normalized_images/*/contentOffset"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mergedText",
+          "targetName": "merged_content"
+        }
+      ],
+      "insertPreTag": " ",
+      "insertPostTag": " "
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "text-split-skill",
+      "description": "Split content into chunks",
+      "context": "/document",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/merged_content"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "textItems",
+          "targetName": "pages"
+        }
+      ],
+      "textSplitMode": "pages",
+      "maximumPageLength": 2000,
+      "pageOverlapLength": 500
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embedding-skill",
+      "description": "Generate vector embeddings with Azure OpenAI",
+      "context": "/document/pages/*",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/pages/*"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "text_vector"
+        }
+      ],
+      "resourceUri": "${AZURE_OPENAI_ENDPOINT}",
+      "deploymentId": "${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}",
+      "modelName": "text-embedding-3-small",
+      "dimensions": 1536
+    }
+  ],
+  "cognitiveServices": {
+    "@odata.type": "#Microsoft.Azure.Search.DefaultCognitiveServices"
+  },
+  "indexProjections": {
+    "selectors": [
+      {
+        "targetIndexName": "document-chunks",
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/pages/*",
+        "mappings": [
+          {
+            "name": "title",
+            "source": "/document/metadata_storage_name"
+          },
+          {
+            "name": "folder_id",
+            "source": "/document/metadata_custom_folder_id"
+          },
+          {
+            "name": "user_id",
+            "source": "/document/metadata_custom_user_id"
+          },
+          {
+            "name": "document_id",
+            "source": "/document/metadata_custom_document_id"
+          },
+          {
+            "name": "chunk_content",
+            "source": "/document/pages/*"
+          },
+          {
+            "name": "content_vector",
+            "source": "/document/pages/*/text_vector"
+          }
+        ]
+      }
+    ]
+  }
+}

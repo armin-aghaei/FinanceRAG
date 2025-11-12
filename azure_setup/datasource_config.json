@@ -1,0 +1,16 @@
+{
+  "name": "blob-datasource",
+  "type": "azureblob",
+  "credentials": {
+    "connectionString": "${AZURE_STORAGE_CONNECTION_STRING}"
+  },
+  "container": {
+    "name": "raw-documents",
+    "query": null
+  },
+  "dataChangeDetectionPolicy": {
+    "@odata.type": "#Microsoft.Azure.Search.HighWaterMarkChangeDetectionPolicy",
+    "highWaterMarkColumnName": "metadata_storage_last_modified"
+  },
+  "dataDeletionDetectionPolicy": null
+}

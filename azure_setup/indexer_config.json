@@ -1,0 +1,37 @@
+{
+  "name": "rag-document-indexer",
+  "description": "Indexer for RAG document processing with semantic chunking",
+  "dataSourceName": "blob-datasource",
+  "targetIndexName": "document-chunks",
+  "skillsetName": "rag-semantic-skillset",
+  "schedule": {
+    "interval": "PT5M",
+    "startTime": "2024-01-01T00:00:00Z"
+  },
+  "parameters": {
+    "batchSize": 30,
+    "maxFailedItems": 0,
+    "maxFailedItemsPerBatch": 0,
+    "base64EncodeKeys": false,
+    "configuration": {
+      "dataToExtract": "contentAndMetadata",
+      "parsingMode": "default",
+      "allowSkillsetToReadFileData": true
+    }
+  },
+  "fieldMappings": [],
+  "outputFieldMappings": [
+    {
+      "sourceFieldName": "/document/user_id",
+      "targetFieldName": "user_id"
+    },
+    {
+      "sourceFieldName": "/document/folder_id",
+      "targetFieldName": "folder_id"
+    },
+    {
+      "sourceFieldName": "/document/document_id",
+      "targetFieldName": "document_id"
+    }
+  ]
+}

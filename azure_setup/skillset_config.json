@@ -1,0 +1,96 @@
+{
+  "name": "rag-semantic-skillset",
+  "description": "Azure-recommended skillset for RAG with semantic chunking",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
+      "name": "document-layout-skill",
+      "description": "Extract document structure with Azure Document Intelligence Layout model",
+      "context": "/document",
+      "inputs": [
+        {
+          "name": "file_data",
+          "source": "/document/file_data"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "markdown_document",
+          "targetName": "markdownDocument"
+        }
+      ],
+      "outputMode": "oneToMany",
+      "markdownHeaderDepth": "h3"
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "text-split-skill",
+      "description": "Split large sections to fit embedding model token limit",
+      "context": "/document/markdownDocument/*",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/markdownDocument/*/content"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "textItems",
+          "targetName": "pages"
+        }
+      ],
+      "textSplitMode": "pages",
+      "maximumPageLength": 5000,
+      "pageOverlapLength": 500,
+      "maximumPagesToTake": null
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embedding-skill",
+      "description": "Generate vector embeddings with Azure OpenAI",
+      "context": "/document/markdownDocument/*/pages/*",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/markdownDocument/*/pages/*"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "text_vector"
+        }
+      ],
+      "resourceUri": "${AZURE_OPENAI_ENDPOINT}",
+      "deploymentId": "${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}",
+      "modelName": "text-embedding-3-large",
+      "dimensions": 3072
+    }
+  ],
+  "cognitiveServices": {
+    "@odata.type": "#Microsoft.Azure.Search.DefaultCognitiveServices"
+  },
+  "indexProjections": {
+    "selectors": [
+      {
+        "targetIndexName": "document-chunks",
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/markdownDocument/*/pages/*",
+        "mappings": [
+          {
+            "name": "title",
+            "source": "/document/metadata_storage_name"
+          },
+          {
+            "name": "chunk_content",
+            "source": "/document/markdownDocument/*/pages/*"
+          },
+          {
+            "name": "content_vector",
+            "source": "/document/markdownDocument/*/pages/*/text_vector"
+          }
+        ]
+      }
+    ]
+  }
+}
