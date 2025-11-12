@@ -23,14 +23,22 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up application...")
 
-    # Create database tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created")
+    # Create database tables (with error handling for deployment)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created")
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}")
+        logger.warning("Application starting without database initialization")
 
-    # Ensure blob storage containers exist
-    await blob_service.ensure_containers_exist()
-    logger.info("Blob storage containers verified")
+    # Ensure blob storage containers exist (with error handling)
+    try:
+        await blob_service.ensure_containers_exist()
+        logger.info("Blob storage containers verified")
+    except Exception as e:
+        logger.error(f"Failed to verify blob storage containers: {e}")
+        logger.warning("Application starting without blob storage verification")
 
     yield
 
