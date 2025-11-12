@@ -86,7 +86,7 @@ async def process_document(document_id: int, db: AsyncSession):
 
         # Update document with processed blob URL and metadata
         document.processed_blob_url = processed_blob_url
-        document.metadata = {
+        document.doc_metadata = {
             "page_count": len(extracted_data.get("pages", [])),
             "table_count": len(extracted_data.get("tables", [])),
             "key_value_pairs": extracted_data.get("key_value_pairs", [])

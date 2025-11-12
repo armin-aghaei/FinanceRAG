@@ -24,7 +24,7 @@ class Document(Base):
     status = Column(Enum(DocumentStatus), default=DocumentStatus.PENDING, nullable=False)
     file_size = Column(Integer, nullable=True)  # Size in bytes
     content_type = Column(String, default="application/pdf", nullable=False)
-    metadata = Column(JSON, nullable=True)  # Store extracted metadata from Document Intelligence
+    doc_metadata = Column(JSON, nullable=True)  # Store extracted metadata from Document Intelligence
     error_message = Column(String, nullable=True)  # Store error details if processing fails
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
