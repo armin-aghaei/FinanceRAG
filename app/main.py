@@ -55,9 +55,11 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Support both explicit origins and wildcard patterns for Lovable deployments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    allow_origin_regex=r"https://.*\.lovable\.(app|dev)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
