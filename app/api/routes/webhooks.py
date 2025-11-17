@@ -8,6 +8,10 @@ import logging
 import hashlib
 import hmac
 import base64
+from sqlalchemy import select
+from app.core.database import AsyncSessionLocal
+from app.models.document import Document, DocumentStatus
+from datetime import datetime
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -100,9 +104,12 @@ async def blob_created_trigger(
 ):
     """
     Webhook triggered when a blob is created in Azure Storage.
-    Immediately triggers the Azure AI Search indexer to process the new document.
 
-    This provides instant document processing instead of waiting for the 5-minute schedule.
+    Workflow:
+    1. Triggers Azure AI Search indexer to process the new document
+    2. Schedules background task to merge metadata after indexing completes
+
+    This provides instant document processing and automatic metadata propagation.
     """
     try:
         events = await request.json()
@@ -117,9 +124,13 @@ async def blob_created_trigger(
 
         # Import here to avoid circular imports
         from app.services.indexer_service import IndexerService
+        from app.services.metadata_merger_service import metadata_merger_service
+        from app.services.azure_table_service import table_service
+        import asyncio
 
         indexer_service = IndexerService()
         triggered_count = 0
+        metadata_merge_tasks = []
 
         # Process each blob creation event
         for event in events:
@@ -133,18 +144,70 @@ async def blob_created_trigger(
 
                 # Only trigger for raw-documents container
                 if "/raw-documents/" in blob_url:
-                    logger.info(f"Triggering indexer for new document")
+                    # Extract blob name from URL
+                    # URL format: https://...blob.core.windows.net/raw-documents/folder-3/uuid.pdf
+                    blob_name = blob_url.split("/raw-documents/")[1] if "/raw-documents/" in blob_url else None
 
-                    # Trigger the indexer to run immediately
-                    result = await indexer_service.run_indexer("rag-document-indexer")
-                    triggered_count += 1
+                    if blob_name:
+                        logger.info(f"Triggering indexer for new document: {blob_name}")
 
-                    logger.info(f"Indexer triggered: {result}")
+                        # Trigger the indexer to run immediately
+                        result = await indexer_service.trigger_indexer_run()
+                        triggered_count += 1
+
+                        logger.info(f"Indexer triggered: {result}")
+
+                        # Retrieve metadata from Table Storage
+                        try:
+                            metadata = table_service.get_document_metadata(blob_name)
+                            folder_id = int(metadata.get('folder_id'))
+                            user_id = int(metadata.get('user_id'))
+                            document_id = int(metadata.get('document_id'))
+
+                            logger.info(
+                                f"Retrieved metadata for {blob_name}: "
+                                f"folder_id={folder_id}, user_id={user_id}, document_id={document_id}"
+                            )
+
+                            # Schedule background task to merge metadata after indexing
+                            # The merger service will retry multiple times waiting for chunks to be created
+                            async def merge_metadata_task():
+                                try:
+                                    result = await metadata_merger_service.merge_metadata_for_document(
+                                        blob_name=blob_name,
+                                        folder_id=folder_id,
+                                        user_id=user_id,
+                                        document_id=document_id,
+                                        max_retries=12,  # Increased from 5 to 12
+                                        retry_delay=10   # 12 retries × 10 seconds = 2 minutes total wait
+                                    )
+                                    logger.info(f"Metadata merge completed for {blob_name}: {result}")
+
+                                    # Update document status based on merge result
+                                    await update_document_status_after_merge(document_id, result)
+
+                                except Exception as e:
+                                    logger.error(f"Metadata merge failed for {blob_name}: {str(e)}")
+
+                                    # Update document status to FAILED
+                                    await update_document_status_to_failed(
+                                        document_id,
+                                        f"Metadata merge error: {str(e)}"
+                                    )
+
+                            # Run metadata merge in background
+                            asyncio.create_task(merge_metadata_task())
+                            metadata_merge_tasks.append(blob_name)
+
+                        except Exception as metadata_error:
+                            logger.warning(f"Could not retrieve metadata for {blob_name}: {str(metadata_error)}")
+                            # Continue processing - indexing will still work
 
         return {
             "status": "processed",
             "events_received": len(events),
-            "indexer_triggered": triggered_count
+            "indexer_triggered": triggered_count,
+            "metadata_merge_scheduled": len(metadata_merge_tasks)
         }
 
     except Exception as e:
@@ -159,3 +222,85 @@ async def blob_created_trigger(
 async def webhook_health():
     """Health check for webhook endpoint."""
     return {"status": "healthy", "endpoint": "webhooks"}
+
+
+async def update_document_status_after_merge(document_id: int, merge_result: dict):
+    """
+    Update document status in database based on metadata merge result.
+
+    Args:
+        document_id: ID of the document to update
+        merge_result: Result dictionary from metadata merger service
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Find the document
+            result = await session.execute(
+                select(Document).where(Document.id == document_id)
+            )
+            document = result.scalar_one_or_none()
+
+            if not document:
+                logger.error(f"Document {document_id} not found in database")
+                return
+
+            old_status = document.status
+
+            # Update status based on merge result
+            if merge_result.get('status') == 'success':
+                document.status = DocumentStatus.INDEXED
+                document.updated_at = datetime.utcnow()
+                logger.info(
+                    f"Successfully merged metadata into {merge_result.get('chunks_updated', 0)} chunks "
+                    f"after {merge_result.get('attempts', 0)} attempts"
+                )
+            elif merge_result.get('status') == 'no_chunks_found':
+                document.status = DocumentStatus.FAILED
+                document.error_message = "No chunks found after metadata merge retries"
+                document.updated_at = datetime.utcnow()
+                logger.warning(f"Metadata merge failed: no chunks found after retries")
+            else:
+                document.status = DocumentStatus.FAILED
+                document.error_message = merge_result.get('error', 'Metadata merge failed')
+                document.updated_at = datetime.utcnow()
+                logger.warning(f"Metadata merge failed: {merge_result}")
+
+            await session.commit()
+
+            logger.info(f"Updated document {document_id} status: {old_status} → {document.status}")
+
+    except Exception as e:
+        logger.error(f"Error updating document {document_id} status: {str(e)}", exc_info=True)
+
+
+async def update_document_status_to_failed(document_id: int, error_message: str):
+    """
+    Update document status to FAILED in database.
+
+    Args:
+        document_id: ID of the document to update
+        error_message: Error message to store
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Find the document
+            result = await session.execute(
+                select(Document).where(Document.id == document_id)
+            )
+            document = result.scalar_one_or_none()
+
+            if not document:
+                logger.error(f"Document {document_id} not found in database")
+                return
+
+            old_status = document.status
+            document.status = DocumentStatus.FAILED
+            document.error_message = error_message
+            document.updated_at = datetime.utcnow()
+
+            await session.commit()
+
+            logger.info(f"Updated document {document_id} status: {old_status} → FAILED (error: {error_message})")
+
+    except Exception as e:
+        logger.error(f"Error updating document {document_id} status to FAILED: {str(e)}", exc_info=True)
