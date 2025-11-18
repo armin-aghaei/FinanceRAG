@@ -2,7 +2,7 @@
 Webhook endpoints for receiving notifications from Azure services.
 """
 
-from fastapi import APIRouter, Request, HTTPException, status, Header
+from fastapi import APIRouter, Request, HTTPException, status, Header, BackgroundTasks
 from typing import Optional
 import logging
 import hashlib
@@ -100,6 +100,7 @@ async def document_processed_notification(
 @router.post("/blob-created")
 async def blob_created_trigger(
     request: Request,
+    background_tasks: BackgroundTasks,
     aeg_event_type: Optional[str] = Header(None)
 ):
     """
@@ -171,32 +172,14 @@ async def blob_created_trigger(
 
                             # Schedule background task to merge metadata after indexing
                             # The merger service will retry multiple times waiting for chunks to be created
-                            async def merge_metadata_task():
-                                try:
-                                    result = await metadata_merger_service.merge_metadata_for_document(
-                                        blob_name=blob_name,
-                                        folder_id=folder_id,
-                                        user_id=user_id,
-                                        document_id=document_id,
-                                        max_retries=12,  # Increased from 5 to 12
-                                        retry_delay=10   # 12 retries × 10 seconds = 2 minutes total wait
-                                    )
-                                    logger.info(f"Metadata merge completed for {blob_name}: {result}")
-
-                                    # Update document status based on merge result
-                                    await update_document_status_after_merge(document_id, result)
-
-                                except Exception as e:
-                                    logger.error(f"Metadata merge failed for {blob_name}: {str(e)}")
-
-                                    # Update document status to FAILED
-                                    await update_document_status_to_failed(
-                                        document_id,
-                                        f"Metadata merge error: {str(e)}"
-                                    )
-
-                            # Run metadata merge in background
-                            asyncio.create_task(merge_metadata_task())
+                            # Use BackgroundTasks to ensure task completes even after response is returned
+                            background_tasks.add_task(
+                                process_document_metadata,
+                                blob_name=blob_name,
+                                folder_id=folder_id,
+                                user_id=user_id,
+                                document_id=document_id
+                            )
                             metadata_merge_tasks.append(blob_name)
 
                         except Exception as metadata_error:
@@ -304,3 +287,47 @@ async def update_document_status_to_failed(document_id: int, error_message: str)
 
     except Exception as e:
         logger.error(f"Error updating document {document_id} status to FAILED: {str(e)}", exc_info=True)
+
+
+async def process_document_metadata(blob_name: str, folder_id: int, user_id: int, document_id: int):
+    """
+    Background task to process document metadata merge and update status.
+
+    This function is executed as a FastAPI background task, which ensures
+    it completes even after the HTTP response is returned.
+
+    Args:
+        blob_name: Name of the blob in storage
+        folder_id: Folder ID for the document
+        user_id: User ID who uploaded the document
+        document_id: Document ID in database
+    """
+    try:
+        from app.services.metadata_merger_service import metadata_merger_service
+
+        logger.info(f"Starting background metadata processing for document {document_id}")
+
+        # Merge metadata into semantic chunks (with retry logic)
+        # Wait up to 2 minutes for indexer to process the document
+        result = await metadata_merger_service.merge_metadata_for_document(
+            blob_name=blob_name,
+            folder_id=folder_id,
+            user_id=user_id,
+            document_id=document_id,
+            max_retries=12,  # Increased from 5 to 12
+            retry_delay=10   # 12 retries × 10 seconds = 2 minutes total wait
+        )
+
+        logger.info(f"Metadata merge completed for {blob_name}: {result}")
+
+        # Update document status based on merge result
+        await update_document_status_after_merge(document_id, result)
+
+    except Exception as e:
+        logger.error(f"Background task failed for {blob_name}: {str(e)}", exc_info=True)
+
+        # Update document status to FAILED
+        await update_document_status_to_failed(
+            document_id,
+            f"Metadata merge error: {str(e)}"
+        )
