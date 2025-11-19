@@ -34,12 +34,22 @@ jobs:
           # pytest tests/
           echo "No tests configured yet"
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
+      - name: Create deployment package
+        run: |
+          zip -r deploy.zip . -x '*.git*' -x '*__pycache__*' -x '*.pytest_cache*' -x '*Sample Documents*' -x '.env*' -x 'test_output*' -x '*.ipynb_checkpoints*' -x '*.md' -x '*.sh' -x 'azure_setup/*' -x '.github/*'
+
+      - name: Azure Login
+        uses: azure/login@v1
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure Web App
+        run: |
+          az webapp deployment source config-zip \
+            --resource-group ccpa-compliance-rg \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --src deploy.zip \
+            --timeout 600
 
       - name: Run database migrations
         run: |
