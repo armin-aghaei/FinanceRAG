@@ -67,9 +67,10 @@ async def upload_document(
     """
     Upload a document to a folder.
 
-    NOTE: Document processing happens automatically via Azure Event Grid.
-    When the file is uploaded to Azure Blob Storage, an Event Grid event
-    is triggered which invokes an Azure Function to process the document.
+    NOTE: Document processing happens automatically via Azure Service Bus.
+    After uploading to Azure Blob Storage, a message is published to Service Bus.
+    A background worker consumes the message, triggers the indexer, polls for
+    completion, and updates the document status to INDEXED or FAILED.
     This provides reliable, scalable, event-driven processing without
     blocking the API response.
     """
@@ -124,15 +125,20 @@ async def upload_document(
         await db.commit()
         await db.refresh(new_document)
 
-        # Processing happens automatically via Azure AI Search Indexer
-        # The indexer runs every 5 minutes and:
-        # 1. Detects new blobs in raw-documents container
-        # 2. Extracts structure with Document Intelligence Layout skill
-        # 3. Chunks semantically with Text Split skill
-        # 4. Generates embeddings with Azure OpenAI skill
-        # 5. Indexes chunks with folder_id, user_id metadata for isolation
-        #
-        # The Event Grid function still monitors and updates document status
+        # Publish document indexing event to Service Bus queue
+        # The background worker will:
+        # 1. Receive the message
+        # 2. Trigger Azure AI Search indexer
+        # 3. Poll for indexing completion
+        # 4. Update document status to INDEXED or FAILED
+        from app.services.service_bus_service import service_bus_publisher
+
+        await service_bus_publisher.publish_document_event(
+            document_id=new_document.id,
+            blob_name=blob_name,
+            folder_id=folder_id,
+            user_id=current_user.id
+        )
 
         return {
             "id": new_document.id,
@@ -203,7 +209,17 @@ async def delete_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a document."""
+    """
+    Delete a document and all associated data.
+
+    Deletion process (all three data stores):
+    1. Delete from Azure Blob Storage (raw and processed containers)
+    2. Delete from Azure Table Storage (metadata)
+    3. Delete chunks from Azure AI Search index (by document_id filter)
+    4. Delete from PostgreSQL database
+
+    If any step fails, we log the error but continue to ensure cleanup.
+    """
     # Get document with folder
     result = await db.execute(
         select(Document)
@@ -221,24 +237,72 @@ async def delete_document(
             detail="Document not found"
         )
 
+    deletion_errors = []
+
     try:
-        # Delete from blob storage
-        blob_service.delete_file(document.filename, settings.RAW_DOCUMENTS_CONTAINER)
+        # Step 1: Delete from Azure Blob Storage
+        try:
+            blob_service.delete_file(document.filename, settings.RAW_DOCUMENTS_CONTAINER)
+            logger.info(f"Deleted blob: {document.filename}")
+        except Exception as blob_error:
+            error_msg = f"Failed to delete blob {document.filename}: {str(blob_error)}"
+            logger.error(error_msg)
+            deletion_errors.append(error_msg)
 
+        # Delete processed blob if it exists
         if document.processed_blob_url:
-            # Extract blob name from URL and delete processed version
-            # This is a simplified version - you might need more robust URL parsing
-            processed_blob_name = document.processed_blob_url.split('/')[-1]
-            blob_service.delete_file(processed_blob_name, settings.PROCESSED_DOCUMENTS_CONTAINER)
+            try:
+                processed_blob_name = document.processed_blob_url.split('/')[-1]
+                blob_service.delete_file(processed_blob_name, settings.PROCESSED_DOCUMENTS_CONTAINER)
+                logger.info(f"Deleted processed blob: {processed_blob_name}")
+            except Exception as processed_error:
+                error_msg = f"Failed to delete processed blob: {str(processed_error)}"
+                logger.error(error_msg)
+                deletion_errors.append(error_msg)
 
-        # Delete from database
-        await db.delete(document)
-        await db.commit()
+        # Step 2: Delete from Azure Table Storage
+        try:
+            from app.services.azure_table_service import table_service
+            table_service.delete_document_metadata(document.filename)
+            logger.info(f"Deleted Table Storage metadata for: {document.filename}")
+        except Exception as table_error:
+            error_msg = f"Failed to delete Table Storage metadata: {str(table_error)}"
+            logger.error(error_msg)
+            deletion_errors.append(error_msg)
+
+        # Step 3: Delete chunks from Azure AI Search index
+        try:
+            from app.services.indexer_service import indexer_service
+            await indexer_service.delete_document_chunks(document_id)
+            logger.info(f"Deleted search index chunks for document_id={document_id}")
+        except Exception as index_error:
+            error_msg = f"Failed to delete search index chunks: {str(index_error)}"
+            logger.error(error_msg)
+            deletion_errors.append(error_msg)
+
+        # Step 4: Delete from PostgreSQL database
+        try:
+            await db.delete(document)
+            await db.commit()
+            logger.info(f"Deleted database record for document_id={document_id}")
+        except Exception as db_error:
+            await db.rollback()
+            error_msg = f"Failed to delete database record: {str(db_error)}"
+            logger.error(error_msg)
+            deletion_errors.append(error_msg)
+            # Re-raise database errors as they're critical
+            raise
+
+        # Log summary
+        if deletion_errors:
+            logger.warning(f"Document {document_id} deleted with {len(deletion_errors)} errors: {deletion_errors}")
+        else:
+            logger.info(f"Document {document_id} successfully deleted from all data stores")
 
         return None
 
     except Exception as e:
-        logger.error(f"Error deleting document: {str(e)}")
+        logger.error(f"Critical error deleting document {document_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete document"

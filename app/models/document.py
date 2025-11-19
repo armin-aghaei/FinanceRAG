@@ -26,6 +26,8 @@ class Document(Base):
     content_type = Column(String, default="application/pdf", nullable=False)
     doc_metadata = Column(JSON, nullable=True)  # Store extracted metadata from Document Intelligence
     error_message = Column(String, nullable=True)  # Store error details if processing fails
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)  # When processing began (for deduplication)
+    processing_lock_id = Column(String, nullable=True)  # UUID lock for idempotent processing
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

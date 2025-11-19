@@ -10,12 +10,12 @@ class DocumentResponse(BaseModel):
     filename: str
     original_filename: str
     status: DocumentStatus
-    file_size: Optional[int]
+    file_size: Optional[int] = None
     content_type: str
-    metadata: Optional[Dict[str, Any]]
-    error_message: Optional[str]
+    doc_metadata: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

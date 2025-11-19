@@ -14,7 +14,7 @@ class SearchService:
     def __init__(self):
         self.endpoint = os.getenv("AZURE_SEARCH_ENDPOINT")
         self.key = os.getenv("AZURE_SEARCH_KEY")
-        self.index_name = "document-chunks"
+        self.index_name = "finance-folder-2"
 
         self.client = SearchClient(
             endpoint=self.endpoint,
@@ -46,7 +46,7 @@ class SearchService:
         self,
         query: str,
         folder_id: int,
-        top: int = 5,
+        top: int = 40,
         use_semantic: bool = True,
         debug: bool = False
     ) -> List[Dict[str, Any]]:
@@ -68,7 +68,7 @@ class SearchService:
         search_params = {
             "search_text": query,
             "top": top * 3,  # Get more results to filter
-            "select": ["id", "parent_id", "title", "chunk_content"],
+            "select": ["id", "parent_id", "title", "chunk"],
         }
 
         if use_semantic:
@@ -97,7 +97,7 @@ class SearchService:
                     filtered_results.append({
                         "id": result.get("id"),
                         "title": result.get("title"),
-                        "content": result.get("chunk_content"),
+                        "content": result.get("chunk"),
                         "score": result.get("@search.score"),
                         "folder_id": result_folder_id
                     })
@@ -115,7 +115,7 @@ class SearchService:
         self,
         query: str,
         folder_ids: List[int],
-        top: int = 5,
+        top: int = 40,
         use_semantic: bool = True
     ) -> List[Dict[str, Any]]:
         """
@@ -132,8 +132,8 @@ class SearchService:
         """
         search_params = {
             "search_text": query,
-            "top": top * 5,  # Get more results to filter
-            "select": ["id", "parent_id", "title", "chunk_content"],
+            "top": top * 2,  # Get more results to filter (2x for multi-folder)
+            "select": ["id", "parent_id", "title", "chunk"],
         }
 
         if use_semantic:
@@ -152,7 +152,7 @@ class SearchService:
                     filtered_results.append({
                         "id": result.get("id"),
                         "title": result.get("title"),
-                        "content": result.get("chunk_content"),
+                        "content": result.get("chunk"),
                         "score": result.get("@search.score"),
                         "folder_id": result_folder_id
                     })

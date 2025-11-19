@@ -25,13 +25,14 @@ async def create_folder(
     With Integrated Vectorization, all folders share a single Azure AI Search index.
     Folder isolation is handled via folder_id filtering at query time.
     """
-    # Hash the folder password
-    hashed_password = get_password_hash(folder_data.password)
+    # Hash the folder password if provided
+    hashed_password = get_password_hash(folder_data.password) if folder_data.password else None
 
     # Create the folder
     new_folder = Folder(
         user_id=current_user.id,
-        folder_name=folder_data.folder_name,
+        folder_name=folder_data.name,
+        description=folder_data.description,
         hashed_password=hashed_password
     )
 
@@ -39,7 +40,15 @@ async def create_folder(
     await db.commit()
     await db.refresh(new_folder)
 
-    return new_folder
+    # Return response with frontend-expected fields
+    return {
+        "id": new_folder.id,
+        "name": new_folder.folder_name,
+        "description": new_folder.description,
+        "is_password_protected": new_folder.hashed_password is not None,
+        "document_count": 0,
+        "created_at": new_folder.created_at
+    }
 
 
 @router.get("", response_model=List[FolderResponse])
@@ -61,16 +70,16 @@ async def list_folders(
 
     folders_with_counts = result.all()
 
-    # Format response
+    # Format response with frontend-expected fields
     response = []
     for folder, doc_count in folders_with_counts:
         folder_dict = {
             "id": folder.id,
-            "folder_name": folder.folder_name,
-            "user_id": folder.user_id,
+            "name": folder.folder_name,
+            "description": folder.description,
+            "is_password_protected": folder.hashed_password is not None,
             "document_count": doc_count,
-            "created_at": folder.created_at,
-            "updated_at": folder.updated_at
+            "created_at": folder.created_at
         }
         response.append(folder_dict)
 
@@ -142,11 +151,11 @@ async def get_folder(
 
     return {
         "id": folder.id,
-        "folder_name": folder.folder_name,
-        "user_id": folder.user_id,
+        "name": folder.folder_name,
+        "description": folder.description,
+        "is_password_protected": folder.hashed_password is not None,
         "document_count": doc_count,
-        "created_at": folder.created_at,
-        "updated_at": folder.updated_at
+        "created_at": folder.created_at
     }
 
 

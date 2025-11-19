@@ -79,12 +79,33 @@ async def lifespan(app: FastAPI):
 
     # Start initialization in background without waiting
     asyncio.create_task(initialize_resources())
+
+    # Start document indexing worker
+    worker_task = None
+    try:
+        from worker.document_indexing_worker import document_worker
+        worker_task = asyncio.create_task(document_worker.start())
+        logger.info("✅ Document indexing worker started")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to start document indexing worker: {e}")
+
     logger.info("Application ready to accept requests")
 
     yield
 
     # Shutdown
     logger.info("Shutting down application...")
+
+    # Stop worker gracefully
+    if worker_task:
+        logger.info("Stopping document indexing worker...")
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            logger.info("✅ Document indexing worker stopped")
+        except Exception as e:
+            logger.error(f"Error stopping worker: {e}")
 
 
 # Create FastAPI app

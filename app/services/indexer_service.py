@@ -20,8 +20,8 @@ class IndexerService:
     def __init__(self):
         self.endpoint = settings.AZURE_SEARCH_ENDPOINT
         self.credential = AzureKeyCredential(settings.AZURE_SEARCH_KEY)
-        self.index_name = "document-chunks"
-        self.indexer_name = "rag-document-indexer"
+        self.index_name = "finance-folder-2"
+        self.indexer_name = "finance-folder-2-indexer"
 
         self.search_client = SearchClient(
             endpoint=self.endpoint,
@@ -123,15 +123,16 @@ class IndexerService:
             vector_query = VectorizedQuery(
                 vector=query_vector,
                 k_nearest_neighbors=top,
-                fields="content_vector"
+                fields="text_vector"
             )
 
             # Search with folder filter (hybrid search: vector + text)
+            # Note: folder_id is Edm.String, so we need quotes in the filter
             results = self.search_client.search(
                 search_text=query,
                 vector_queries=[vector_query],
-                filter=f"folder_id eq {folder_id}",
-                select=["chunk_content", "title", "page_number", "document_id", "parent_id"],
+                filter=f"folder_id eq '{folder_id}'",
+                select=["chunk", "title", "document_id", "parent_id", "folder_id", "user_id"],
                 top=top
             )
 
@@ -140,11 +141,12 @@ class IndexerService:
             for result in results:
                 search_results.append({
                     "score": result.get("@search.score", 0),
-                    "content": result.get("chunk_content", ""),
+                    "content": result.get("chunk", ""),
                     "title": result.get("title", ""),
-                    "page_number": result.get("page_number"),
                     "document_id": result.get("document_id"),
-                    "parent_id": result.get("parent_id")
+                    "parent_id": result.get("parent_id"),
+                    "folder_id": result.get("folder_id"),
+                    "user_id": result.get("user_id")
                 })
 
             logger.info(f"Search completed: {len(search_results)} results found for folder {folder_id}")
@@ -166,9 +168,10 @@ class IndexerService:
         """
         try:
             # Search for all chunks with this document_id
+            # Note: document_id is Edm.String, so we need quotes in the filter
             results = self.search_client.search(
                 search_text="*",
-                filter=f"document_id eq {document_id}",
+                filter=f"document_id eq '{document_id}'",
                 select=["id"],
                 top=1000  # Max chunks per document
             )
@@ -202,9 +205,10 @@ class IndexerService:
         try:
             # Get total document count
             if folder_id:
+                # Note: folder_id is Edm.String, so we need quotes in the filter
                 results = self.search_client.search(
                     search_text="*",
-                    filter=f"folder_id eq {folder_id}",
+                    filter=f"folder_id eq '{folder_id}'",
                     include_total_count=True,
                     top=0
                 )

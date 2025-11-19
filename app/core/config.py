@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     AZURE_SEARCH_KEY: str
     AZURE_SEARCH_INDEX_PREFIX: str = "rag-index"
 
+    # Azure Service Bus
+    SERVICE_BUS_CONNECTION_STRING: str
+    SERVICE_BUS_QUEUE_NAME: str = "document-indexing"
+
     # Azure OpenAI
     AZURE_OPENAI_ENDPOINT: str
     AZURE_OPENAI_KEY: str

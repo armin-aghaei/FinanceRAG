@@ -4,8 +4,9 @@ from typing import Optional
 
 
 class FolderCreate(BaseModel):
-    folder_name: str = Field(..., min_length=1, max_length=255)
-    password: str = Field(..., min_length=4, description="Folder password must be at least 4 characters")
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    password: Optional[str] = Field(None, min_length=4, description="Folder password must be at least 4 characters")
 
 
 class FolderAccess(BaseModel):
@@ -14,11 +15,11 @@ class FolderAccess(BaseModel):
 
 class FolderResponse(BaseModel):
     id: int
-    folder_name: str
-    user_id: int
-    document_count: Optional[int] = 0
+    name: str
+    description: Optional[str] = None
+    is_password_protected: bool
+    document_count: int = 0
     created_at: datetime
-    updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True

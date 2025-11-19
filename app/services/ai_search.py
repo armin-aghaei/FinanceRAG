@@ -138,7 +138,7 @@ class AISearchService:
         self,
         index_name: str,
         query: str,
-        top: int = 5,
+        top: int = 40,
         select: List[str] = None
     ) -> List[Dict[str, Any]]:
         """

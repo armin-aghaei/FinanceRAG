@@ -10,9 +10,9 @@ from app.schemas.user import UserCreate, UserLogin, UserResponse, Token
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def signup(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Register a new user."""
+    """Register a new user and return an access token."""
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     existing_user = result.scalar_one_or_none()
@@ -35,7 +35,10 @@ async def signup(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(new_user)
 
-    return new_user
+    # Create access token (sub must be string per JWT spec)
+    access_token = create_access_token(data={"sub": str(new_user.id)})
+
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/login", response_model=Token)
